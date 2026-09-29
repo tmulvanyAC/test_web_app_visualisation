@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="Average Spectrum Viewer", layout="wide")
+st.set_page_config(page_title="Advanced Imaging Repository Viewer", layout="wide")
 
 # Initialize session state for comparisons
 if 'comparisons' not in st.session_state:
@@ -33,6 +33,29 @@ def apply_partial_auc_normalization(df, cols, ppm_vals):
     norm_df[cols] = spectra.div(row_sums, axis=0)
     
     return norm_df
+
+def add_metabolite_markers(fig):
+    """Helper function to add metabolite markers to a plotly figure."""
+    metabolites = {
+        "Lipids/Lactate": [1.2,1.4],
+        "NAA": 2.02,
+        "Glx/GABA": [2.1,2.4],
+        "Creatine": 3.03,
+        "Choline": 3.22,
+        "Taurine": 3.42,
+        "myo-Inositol/Glycine": 3.56
+    }
+    
+    # Add single line markers
+    for name, ppm in metabolites.items():
+        if type(ppm) == list:
+            fig.add_vrect(x0=ppm[0], x1=ppm[-1], fillcolor="gray", opacity=0.15, layer="below", line_width=0,
+                          annotation_text=name, annotation_textangle=-90, annotation_position="top")
+        else:
+            fig.add_vline(x=ppm, line_width=3, line_dash="dash", line_color="gray", opacity=0.7,
+                          annotation_text=name, annotation_textangle=-90, annotation_position="top left")
+    
+    return fig
 
 #%% File Upload & Data Loading
 st.sidebar.header("Data Source")
@@ -73,7 +96,7 @@ base_df = apply_partial_auc_normalization(base_df, ppm_cols, ppm_values)
 
 # Field Strength
 field_strengths = base_df["FieldStrength"].dropna().unique()
-selected_field_strengths = st.sidebar.multiselect("Field Strength", field_strengths, default=field_strengths)
+selected_field_strengths = st.sidebar.multiselect("Field Strength (T)", field_strengths, default=field_strengths)
 
 # Location
 locations = base_df["TumourLocation"].dropna().unique()
@@ -122,7 +145,6 @@ if valid_subtype_cats:
             default=available_subtypes
         )
 
-
 #%% Apply Filters
 filtered_df = base_df.copy()
 filtered_df = filtered_df[filtered_df["FieldStrength"].isin(selected_field_strengths)]
@@ -168,6 +190,10 @@ with tab_search:
                 "q75": q75
             })
             st.success(f"Added '{filter_desc}' to Compare tab!")
+            
+        col1, col2 = st.columns([4, 1])
+        with col2:
+            show_metab_search = st.checkbox("Show Metabolite Markers", value=True, key="search_meta")
         
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=ppm_values, y=q75, mode='lines', line=dict(width=0), showlegend=False))
@@ -188,6 +214,10 @@ with tab_search:
             hovermode="x unified",
             legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99)
         )
+        
+        if show_metab_search:
+            fig = add_metabolite_markers(fig)
+            
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("No data matches the current filter combination.")
@@ -201,6 +231,10 @@ with tab_compare:
         if st.button("🗑️ Clear All Comparisons"):
             st.session_state.comparisons = []
             st.rerun()
+
+        col1, col2 = st.columns([4, 1])
+        with col2:
+            show_metab_comp = st.checkbox("Show Metabolite Markers", value=True, key="comp_meta")
 
         fig_comp = go.Figure()
         
@@ -241,4 +275,8 @@ with tab_compare:
                 yanchor="top", y=1, xanchor="left", x=1.02
             )
         )
+        
+        if show_metab_comp:
+            fig_comp = add_metabolite_markers(fig_comp)
+            
         st.plotly_chart(fig_comp, use_container_width=True)
