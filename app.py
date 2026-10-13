@@ -49,7 +49,11 @@ st.markdown(
 # Page Title with description info tooltip
 st.title(
     "Short-Echo Single Voxel Spectroscopy",
-    help="SVS acquired at short echo times 30-41ms at diagnosis prior to surgery or commencement of treatment.",
+    help=
+    """SVS acquired at short echo times 30-41ms at diagnosis prior to surgery
+    or commencement of treatment.\n Spectra have had baseline signal subtracted, been normalised via division by 
+    area under the curve, and resampled to 1024 points between 0.5-4.0 ppm (inclusive).
+    """
 )
 
 # Metabolite Group Definitions
