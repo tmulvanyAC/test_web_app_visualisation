@@ -2,8 +2,49 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import io
 
 st.set_page_config(page_title="Advanced Imaging Repository Viewer", layout="wide")
+
+st.markdown(
+    """
+    <style>
+        .block-container {
+            padding-top: 3.8rem !important;
+            padding-bottom: 1rem !important;
+        }
+        h1 {
+            font-size: 1.7rem !important;
+            line-height: 1.2 !important;
+            margin-top: 0rem !important;
+            margin-bottom: 0.15rem !important;
+            padding-top: 0rem !important;
+            padding-bottom:0.1rem !important;
+        }
+        h2, h3, h4 {
+            margin-top: 0.25rem !important;
+            margin-bottom: 0.25rem !important;
+        }
+        h5 {
+            font-size: 1.05rem !important;
+            margin-top: 1.1rem !important;
+            margin-bottom: 0.05rem !important;
+        }
+        div[data-testid="stVerticalBlock"] > div {
+            gap: 0.5rem !important;
+        }
+        div[data-testid="stSegmentedControl"],
+        div[data-testid="stButtonGroup"],
+        div[data-testid*="stPills"],
+        div[aria-label="Metabolite Contributions"] {
+        margin-top: 0rem !important;
+        margin-bottom: 0rem !important;
+        padding-top: 0rem !important;
+    }
+    </style>
+""",
+    unsafe_allow_html=True,
+)
 
 # Page Title with description info tooltip
 st.title(
@@ -45,7 +86,7 @@ def load_data(source):
     spectra = archive["spectra"]
     ppm = archive["ppm"].astype(float)
     metabolites = [str(m) for m in archive["metabolites"]]
-    meta_df = pd.read_json(str(archive["metadata_json"]), orient="split")
+    meta_df = pd.read_json(io.StringIO(str(archive["metadata_json"])), orient="split")
 
     for col in ["HistologicalSubtype", "MolecularSubtype", "TumourLocation"]:
         if col in meta_df.columns:
@@ -168,11 +209,9 @@ filtered_indices = np.where(filter_mask)[0]
 
 #%% Define Functional Tabs
 tab_search, tab_compare = st.tabs(["🔍 Search & Filter", "📊 Compare Spectra"])
-#Search Tab
-with tab_search:
-    st.write(f"### {selected_diagnosis}")
-    st.write(f"**Filtered Spectra count:** {len(filtered_df)} / {len(base_df)} total")
 
+# Search Tab
+with tab_search:
     if len(filtered_indices) > 0:
         cohort_tensor = spectra[filtered_indices]
 
@@ -194,15 +233,6 @@ with tab_search:
                 group_per_patient = cohort_tensor[:, group_indices, :].sum(axis=1)
                 cohort_metabolite_medians[group_label] = np.median(group_per_patient, axis=0)
 
-        # Metabolite contribution controls
-        st.write("#### Metabolite Contributions")
-        selected_groups = st.pills(
-            "Toggle metabolites to display:",
-            options=active_group_options,
-            selection_mode="multi",
-            default=[],
-        )
-
         # Comparison label construction
         filter_desc = f"{selected_diagnosis} (n={len(filtered_df)}) | {selected_field_strength}T"
         if selected_age_range[0] != min_age or selected_age_range[1] != max_age:
@@ -210,20 +240,45 @@ with tab_search:
         if subtype_category != "None" and len(selected_subtypes) > 0:
             filter_desc += f" | {','.join(str(s) for s in selected_subtypes)}"
 
-        if st.button("➕ Add to Comparison"):
-            st.session_state.comparisons.append({
-                "name": filter_desc,
-                "median": median_spectrum,
-                "q25": q25,
-                "q75": q75,
-                "metabolite_medians": cohort_metabolite_medians,
-            })
-            st.success(f"Added '{filter_desc}' to Compare tab!")
+        col_title, col_btn = st.columns([3, 1], vertical_alignment="center")
+        with col_title:
+            st.markdown(f"<h3 style='margin:0; padding:0; display:inline;'>{selected_diagnosis}</h3> "
+            f"<span style='font-size: 1.0rem; color: #666; margin-left: 8px;'>"
+            f"<b>Displayed Spectra:</b> {len(filtered_df)} / {len(base_df)}</span>",
+            unsafe_allow_html=True)
+        with col_btn:
+            if st.button("➕ Add to Comparison", use_container_width=True):
+                st.session_state.comparisons.append({
+                    "name": filter_desc,
+                    "median": median_spectrum,
+                    "q25": q25,
+                    "q75": q75,
+                    "metabolite_medians": cohort_metabolite_medians,
+                })
+                st.toast(f"Added '{filter_desc}' to Compare tab!", icon="✅")
+        
+        st.markdown(
+            """<h5 style="margin: 0; padding: 0; display: inline-flex; align-items: center; gap: 6px;">
+                Metabolite Contributions
+                <span title="Toggle individual or grouped metabolite fits to overlay on the aggregated spectrum." 
+                    style="cursor: help; font-size: 0.85rem; color: #888;">
+                    &#9432;
+                </span>
+            </h5>""",
+            unsafe_allow_html=True,     
+        )
+        selected_groups = st.pills(
+            "Metabolite Contributions",
+            options=active_group_options,
+            selection_mode="multi",
+            default=[],
+            label_visibility="collapsed",
+        )
 
         # Main Plot
         fig = go.Figure()
 
-        #Full Median + IQR
+        # Full Median + IQR
         fig.add_trace(go.Scatter(
             x=ppm_values, y=q25, mode="lines",
             line=dict(width=0), showlegend=False, hoverinfo="skip"
@@ -239,7 +294,7 @@ with tab_search:
             line=dict(color="rgba(0, 114, 178, 1)", width=2.5)
         ))
 
-        #Selected Metabolite
+        # Selected Metabolites
         for i, group_label in enumerate(selected_groups):
             if group_label in cohort_metabolite_medians:
                 group_median = cohort_metabolite_medians[group_label]
@@ -253,41 +308,50 @@ with tab_search:
                 ))
 
         fig.update_layout(
-            title="Aggregated Spectrum & Metabolite Breakdown",
+            title="Average Spectrum for Selected Group",
+            height=480,
             xaxis_title="Chemical Shift (ppm)",
             yaxis_title=y_axis_label,
             xaxis=dict(autorange="reversed"),
             hovermode="x unified",
             legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
+                yanchor="top",
+                x=1.02,
+                xanchor="left",
+                y=1,
             ),
-            margin=dict(l=40, r=40, t=60, b=40)
+            margin=dict(l=25, r=25, t=25, b=25),
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("No data matches the current filter combination.")
 
+# Compare Tab
 with tab_compare:
-    st.write("### Comparison View")
-
     if len(st.session_state.comparisons) == 0:
         st.info("No spectra added for comparison yet. Use the 'Add to Comparison' button in the Search tab.")
     else:
-        c1, c2 = st.columns([3, 1])
+        c1, c2 = st.columns([3, 1], vertical_alignment="center")
         with c1:
+            st.markdown(
+                """<h5 style="margin: 0; padding: 0; display: inline-flex; align-items: center; gap: 6px;">
+                    Metabolite Contributions
+                    <span title="Toggle individual or grouped metabolite fits to overlay on the aggregated spectrum (max 1)." 
+                        style="cursor: help; font-size: 0.85rem; color: #888;">
+                        &#9432;
+                    </span>
+                </h5>""",
+                unsafe_allow_html=True,     
+            )
             compare_metabolite = st.pills(
-                "Overlay Metabolite Contribution across Cohorts (limit 1):",
+                "Metabolite Contributions",
                 options=["None"] + active_group_options,
                 selection_mode="single",
-                default="None"
+                default="None",
+                label_visibility="collapsed"
             )
         with c2:
-            st.write("")
-            if st.button("🗑️ Clear All Comparisons"):
+            if st.button("🗑️ Clear All Comparisons", use_container_width=True):
                 st.session_state.comparisons = []
                 st.rerun()
 
@@ -338,6 +402,7 @@ with tab_compare:
 
         fig_comp.update_layout(
             title="Spectral Comparison Between Selected Groups",
+            height=480,
             xaxis_title="Chemical Shift (ppm)",
             yaxis_title=y_axis_label,
             xaxis=dict(autorange="reversed"),
@@ -349,5 +414,6 @@ with tab_compare:
                 xanchor="left",
                 x=1.02,
             ),
+            margin=dict(l=25, r=25, t=25, b=25),
         )
         st.plotly_chart(fig_comp, use_container_width=True)
